@@ -1,4 +1,10 @@
   require("dotenv").config();
+  class ExpressError extends Error {
+   constructor(status,message){
+    super(message)
+    this.status=status
+   }
+}
 const express = require('express'); 
 
 const app = express();
@@ -12,21 +18,34 @@ const cookieParser = require('cookie-parser');
 app.use(express.json())
 app.use(cookieParser())
 
+// const wrapAsync = (fn)=>{
+//   return async(req,res,next)=>{
+//     try{
+//     await fn(req,res,next)}
+//     catch(err){next(err)}
+//   }
+// } 
+// it is simpler version
+
+const wrapAsync = (fn)=>{
+    return (req,res,next)=>{
+        fn(req,res,next).catch(next)
+    }
+}
+// this is shorter one
+
+
 const authMiddleware= (req,res,next)=>{
     try{
         const token = req.cookies.token
         if(!token){
-            return res.status(401).json({
-            message:'unauthorized'
-        })
+            throw new ExpressError(401,'Unauthorized')
         }
         const decoded = jwt.verify(token,JWT_SECRET)
          req.user = decoded
          next() 
     } catch(e){
-       return res.status(401).json({
-            message:'unauthorized'
-        })
+       next(e)
     }
 
 }
@@ -35,16 +54,15 @@ async function connectDB() {
 }
 connectDB().then(() => console.log("Connected to MongoDB")).catch(err => console.log(err));
 
-app.post('/api/auth/register',async(req,res)=>{
+app.post('/api/auth/register',wrapAsync(async(req,res)=>{
     const{email,name,password} = req.body
     if(!name || !email || !password){
-        return res.status(400).json({
-            message:'All fields are required'
-        })
+       throw new ExpressError(400,'All details required')
+        
     }
     const existedUser =await User.findOne({email})
     if(existedUser){
-       return res.status(409).json({message:"user already existed",})
+       throw new ExpressError(409,'User already existed')
     }
     
         let hashPass = await bcrypt.hash(password,10)
@@ -52,21 +70,18 @@ app.post('/api/auth/register',async(req,res)=>{
         await newUser.save()
         res.status(201).json({message:'user created'})
     
-})
+}))
 
-app.post('/api/auth/login',async(req,res)=>{
+app.post('/api/auth/login',wrapAsync(async(req,res)=>{
     const{email, password} = req.body
      if( !email || !password){
-        return res.status(400).json({
-            message:'All fields are required'
-        })
+               throw new ExpressError(400,'All details required')
+
     }
    const existingUser = await User.findOne({ email });
 
 if (!existingUser) {
-    return res.status(401).json({
-        message: "Invalid email or password"
-    });
+    throw new ExpressError(401,'Invaid email or password')
 }
 
 const isMatch = await bcrypt.compare(
@@ -75,9 +90,8 @@ const isMatch = await bcrypt.compare(
 );
 
 if (!isMatch) {
-    return res.status(401).json({
-        message: "Invalid email or password"
-    });
+     throw new ExpressError(401,'Invaid email or password')
+
 }
 const payload = {
     userId:existingUser._id
@@ -93,13 +107,17 @@ res.cookie("token", token, {
 });
 return res.status(200).json({
     message: "User logged in",
-});
 })
-app.get('/profile',authMiddleware,async(req,res)=>{
+}))
+app.get('/profile',authMiddleware,wrapAsync(async(req,res)=>{
     const user = await User.findById(req.user.userId).select('-password')
     res.status(200).json({
         user
     })
+}))
+app.use((err,req,res,next)=>{
+    const {status=500, message="Something went wrong"} = err
+    res.status(status).json({message})
 })
 app.listen(process.env.PORT, () => {
     console.log("Server is running");
