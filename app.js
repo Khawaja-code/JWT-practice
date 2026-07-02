@@ -15,6 +15,7 @@ const bcrypt = require('bcrypt')
 const jwt = require("jsonwebtoken");
 const JWT_SECRET =process.env.JWT_SECRET
 const cookieParser = require('cookie-parser');
+const {registerSchema,loginSchema} = require('./schema.js')
 app.use(express.json())
 app.use(cookieParser())
 
@@ -39,22 +40,38 @@ const authMiddleware= (req,res,next)=>{
     try{
         const token = req.cookies.token
         if(!token){
-            throw new ExpressError(401,'Unauthorized')
+            // we will not do this because catch block will replace this
+            // throw new ExpressError(401,'Unauthorized')  
+
+            // Except we do this as it will not be replaced 
+            return next(new ExpressError(401,'Unauthorized'))
         }
         const decoded = jwt.verify(token,JWT_SECRET)
          req.user = decoded
          next() 
-    } catch(e){
-       next(e)
+    } catch{
+
+       next(new ExpressError(401,'Unauthorized'))
+
     }
 
+}
+const validateMiddleware = (schema)=>{
+    return (req,res,next)=>{
+        const {error} = schema.validate(req.body,{abortEarly:false})
+        if(error){
+            const errMsg = error.details.map((el)=>el.message).join(", ")
+            throw new ExpressError(400,errMsg)
+        }
+        next()
+    }
 }
 async function connectDB() {
     await mongoose.connect(dbUrl)
 }
 connectDB().then(() => console.log("Connected to MongoDB")).catch(err => console.log(err));
 
-app.post('/api/auth/register',wrapAsync(async(req,res)=>{
+app.post('/api/auth/register',validateMiddleware(registerSchema),wrapAsync(async(req,res)=>{
     const{email,name,password} = req.body
     if(!name || !email || !password){
        throw new ExpressError(400,'All details required')
@@ -72,7 +89,7 @@ app.post('/api/auth/register',wrapAsync(async(req,res)=>{
     
 }))
 
-app.post('/api/auth/login',wrapAsync(async(req,res)=>{
+app.post('/api/auth/login',validateMiddleware(loginSchema),wrapAsync(async(req,res)=>{
     const{email, password} = req.body
      if( !email || !password){
                throw new ExpressError(400,'All details required')
